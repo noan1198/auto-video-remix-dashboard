@@ -73,6 +73,30 @@ type UploadResult = {
   error?: string;
 };
 
+type ProjectCapabilities = {
+  schemaVersion: number;
+  mode: "not-ready" | "dashboard-only" | "reference-intake" | "production-toolkit";
+  viewerReady: boolean;
+  referenceReady: boolean;
+  productionToolkitPresent: boolean;
+  assetCount: number;
+  missing: {
+    viewer: string[];
+    reference: string[];
+    productionToolkit: string[];
+  };
+  perTaskRequirements: string[];
+};
+
+const capabilityFeatures = [
+  { number: "01", title: "导入对标爆款", detail: "拖入 MP4、MOV 或 M4V，在本机建立独立日期任务。" },
+  { number: "02", title: "拆解镜头节奏", detail: "识别镜头边界、时长和关键帧，保留参考音轨供分析。" },
+  { number: "03", title: "查看素材缩略图", detail: "按场景、动作、产品和文件名搜索自己的素材库。" },
+  { number: "04", title: "管理素材复用", detail: "显示确认成片中的使用次数、冷却和复用上限。" },
+  { number: "05", title: "一屏对照制作", detail: "同时查看对标视频、当前选片审核图和生成成片。" },
+  { number: "06", title: "追踪生产状态", detail: "查看文案、匹配、配音、渲染、审核和交付阶段。" },
+];
+
 const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://127.0.0.1:8765";
 
 const stageLabels: Record<string, string> = {
@@ -116,6 +140,11 @@ function statusText(status: string) {
   if (status === "needs_review" || status === "pending") return "待审核";
   if (status === "failed") return "未通过";
   return status || "待处理";
+}
+
+function readinessClass(value: boolean | undefined) {
+  if (value === undefined) return "checking";
+  return value ? "ready" : "missing";
 }
 
 async function fetchDashboardData() {
@@ -210,6 +239,7 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "analyzing" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [capabilities, setCapabilities] = useState<ProjectCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -223,6 +253,17 @@ export default function Home() {
       }
     }
     load();
+    async function loadCapabilities() {
+      try {
+        const response = await fetch(`${localApiUrl}/api/health`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { capabilities?: ProjectCapabilities };
+        if (payload.capabilities) setCapabilities(payload.capabilities);
+      } catch {
+        return;
+      }
+    }
+    loadCapabilities();
   }, []);
 
   function chooseBenchmark(file: File | null) {
@@ -239,7 +280,7 @@ export default function Home() {
   }
 
   async function createBenchmarkTask() {
-    if (!benchmarkFile || uploadStatus === "uploading" || uploadStatus === "analyzing") return;
+    if (!benchmarkFile || capabilities?.referenceReady === false || uploadStatus === "uploading" || uploadStatus === "analyzing") return;
     setUploadStatus("uploading");
     setUploadProgress(0);
     setUploadMessage("正在把视频保存到新的本地任务文件夹");
@@ -295,6 +336,7 @@ export default function Home() {
   const progress = selectedProject.shotCount
     ? Math.round((selectedProject.matchedCount / selectedProject.shotCount) * 100)
     : 0;
+  const referenceReady = capabilities?.referenceReady === true;
 
   return (
     <main className="dashboard-shell">
@@ -307,7 +349,18 @@ export default function Home() {
           </div>
         </div>
 
-        <button className="new-task-card" type="button" aria-label="新建爆款任务" onClick={() => setCreateOpen(true)}>
+        <button
+          className="new-task-card"
+          type="button"
+          aria-label="新建爆款任务"
+          onClick={() => {
+            if (!referenceReady) {
+              setUploadStatus("error");
+              setUploadMessage(`当前项目还不能拆解视频，缺少：${capabilities?.missing.reference.join("、") || "本机生产工具"}`);
+            }
+            setCreateOpen(true);
+          }}
+        >
           <span className="new-task-plus">+</span>
           <span>
             <strong>新建爆款任务</strong>
@@ -317,8 +370,9 @@ export default function Home() {
 
         <nav className="side-nav" aria-label="工作台导航">
           <a className="active" href="#overview"><span>01</span>本次任务</a>
-          <a href="#assets"><span>02</span>素材库</a>
-          <a href="#projects"><span>03</span>历史成片</a>
+          <a href="#capabilities"><span>02</span>能做什么</a>
+          <a href="#assets"><span>03</span>素材库</a>
+          <a href="#projects"><span>04</span>历史成片</a>
         </nav>
 
         <div className="sidebar-note">
@@ -374,6 +428,45 @@ export default function Home() {
             <strong>{selectedProject.matchedCount}/{selectedProject.shotCount}</strong>
             <small>{progress}% 镜头已找到素材</small>
           </article>
+        </section>
+
+        <section className="capability-section" id="capabilities">
+          <div className="section-heading capability-heading">
+            <div>
+              <p className="eyebrow">这个工作台能做什么</p>
+              <h2>把对标、素材、选片和成片放在一套本机流程里</h2>
+            </div>
+            <p>网页负责看清任务和启动对标拆解，完整成片仍按正式文案、素材匹配、整篇配音和审核流程继续生产。</p>
+          </div>
+
+          <div className="capability-grid">
+            {capabilityFeatures.map((feature) => (
+              <article key={feature.number}>
+                <span>{feature.number}</span>
+                <h3>{feature.title}</h3>
+                <p>{feature.detail}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="readiness-panel">
+            <div>
+              <p className="eyebrow">当前电脑安装检查</p>
+              <h3>网页能打开，不代表已经具备完整自动剪辑条件</h3>
+              <p>生产工具齐全后，每条视频仍需要正式文案、可用配音配置和人工视觉审核。</p>
+            </div>
+            <div className="readiness-list" aria-label="当前项目能力">
+              <span className={readinessClass(capabilities?.viewerReady)}>
+                <i />网页查看素材与任务
+              </span>
+              <span className={readinessClass(capabilities?.referenceReady)}>
+                <i />导入并拆解对标视频
+              </span>
+              <span className={readinessClass(capabilities?.productionToolkitPresent)}>
+                <i />完整生产工具脚本
+              </span>
+            </div>
+          </div>
         </section>
 
         <section className="project-stage" id="workflow">
@@ -602,6 +695,13 @@ export default function Home() {
               <span>参考视频的原文、原声不会直接用于新成片。拆解完成后，任务会停在“待提供正式文案”。</span>
             </div>
 
+            {!referenceReady && (
+              <div className="missing-tools-note">
+                <strong>当前项目还不能创建对标任务</strong>
+                <span>缺少：{capabilities?.missing.reference.join("、") || "本机视频拆解工具"}</span>
+              </div>
+            )}
+
             {(uploadStatus === "uploading" || uploadStatus === "analyzing") && (
               <div className="upload-progress" aria-live="polite">
                 <div><span style={{ width: `${uploadStatus === "analyzing" ? 100 : uploadProgress}%` }} /></div>
@@ -625,7 +725,7 @@ export default function Home() {
               <button
                 className="primary-button"
                 type="button"
-                disabled={!benchmarkFile || uploadStatus === "uploading" || uploadStatus === "analyzing" || uploadStatus === "done"}
+                disabled={!benchmarkFile || !referenceReady || uploadStatus === "uploading" || uploadStatus === "analyzing" || uploadStatus === "done"}
                 onClick={createBenchmarkTask}
               >
                 {uploadStatus === "uploading" ? `正在上传 ${uploadProgress}%` : uploadStatus === "analyzing" ? "正在拆解视频" : "创建并开始拆解"}

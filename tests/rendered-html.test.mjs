@@ -50,9 +50,12 @@ test("removes starter markers and ignores local project snapshots", async () => 
   assert.match(page, /新建爆款任务/);
   assert.match(page, /创建并开始拆解/);
   assert.match(page, /待提供正式文案/);
+  assert.match(page, /这个工作台能做什么/);
+  assert.match(page, /网页能打开，不代表已经具备完整自动剪辑条件/);
   assert.match(layout, /title:\s*"爆款素材工作台"/);
   assert.match(css, /\.asset-grid/);
   assert.match(css, /\.drop-zone/);
+  assert.match(css, /\.capability-grid/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(gitignore, /public\/dashboard-data\.json/);
   assert.match(gitignore, /public\/local-media/);

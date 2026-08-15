@@ -1,4 +1,4 @@
 interface:
   display_name: "爆款素材工作台"
-  short_description: "在本机网页中导入对标视频，并查看素材复用次数、制作进度和成片"
-  default_prompt: "Use $auto-video-remix-dashboard to open the local video material dashboard and create a dated task when I drag in a new benchmark video."
+  short_description: "检查本机剪辑能力，导入对标视频并查看素材、进度和成片"
+  default_prompt: "Use $auto-video-remix-dashboard to check this project's available remix capabilities, open the local dashboard, and create a dated benchmark task only when the required intake tools exist."

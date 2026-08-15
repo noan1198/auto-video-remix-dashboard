@@ -18,6 +18,13 @@ from urllib.parse import parse_qs, urlparse
 
 
 SITE_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_ROOT = SITE_ROOT / "scripts"
+if str(SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_ROOT))
+
+from check_project import inspect_project
+
+
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v"}
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
@@ -298,7 +305,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json(200, {"ok": True, "projectId": project_id(self.project_root)})
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "projectId": project_id(self.project_root),
+                    "capabilities": inspect_project(self.project_root),
+                },
+            )
             return
         if parsed.path == "/api/refresh":
             try:
@@ -316,6 +330,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path != "/api/tasks":
             self.send_json(404, {"ok": False, "error": "接口不存在"})
+            return
+        capabilities = inspect_project(self.project_root)
+        if not capabilities["referenceReady"]:
+            missing = "、".join(capabilities["missing"]["reference"])
+            self.send_json(409, {"ok": False, "error": f"当前项目不能拆解对标视频，缺少：{missing}"})
             return
         query = parse_qs(parsed.query)
         original_name = (query.get("filename") or [""])[0]
@@ -366,7 +385,7 @@ def main() -> int:
     args = parser.parse_args()
 
     project_root = args.project_root.expanduser().resolve()
-    missing = [name for name in ("assets", "work", "tools") if not (project_root / name).is_dir()]
+    missing = [name for name in ("assets", "work") if not (project_root / name).is_dir()]
     if missing:
         raise RuntimeError(f"项目目录缺少: {', '.join(missing)}")
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
