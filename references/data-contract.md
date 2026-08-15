@@ -1,0 +1,37 @@
+# Dashboard data contract
+
+The dashboard reads one generated file at `public/dashboard-data.json` and falls back to `public/dashboard-data.example.json` when no local project snapshot exists.
+
+## Project inputs
+
+- `assets/`: local video library. Read files and cached frames without modifying source media.
+- `asset_library_catalog.json`: optional product, category, and visual-purpose descriptions.
+- `asset_usage_registry.json`: confirmed appearance counts keyed by content fingerprint.
+- `work/.cache/asset_frame_catalog_v1.json`: optional portrait or mixed-orientation cached review frames.
+- `work/.cache/horizontal_asset_frame_catalog_v1.json`: optional horizontal cached review frames.
+- `work/<task>/reference-*.mp4`: benchmark video name.
+- `work/<task>/video_clips/fragment*_keyframe.*`: benchmark poster fallback.
+- `work/<task>/fragment_plan.json`: shot count, selected assets, matches, and missing fragments.
+- `work/<task>/visual_duplicate_audit.json`: review board path and visual audit status.
+- `work/<task>/pipeline_state.json`: production stage status.
+- `work/<task>/task_config.json`: canvas orientation, dimensions, and frame rate.
+- `work/<task>/remix.mp4`: rendered output and output poster source.
+- `work/<task>/dashboard_task.json`: local dashboard intake state, original upload name, and the next required input. It must record `reference_copy_authorized: false` for a newly dragged benchmark.
+
+## Exported fields
+
+The root object contains `schemaVersion`, `generatedAt`, `source`, `summary`, `assets`, and `projects`.
+
+Each asset contains a stable id derived from its project-relative path, display metadata, a generated thumbnail URL, confirmed reuse count, reuse status, last confirmed use time, duration, and dimensions. Absolute source paths are omitted.
+
+Each project contains its folder-derived id and title, reference poster, selected-shot review board, output poster, shot and missing counts, audit status, canvas settings, and all pipeline stages. Missing stages are exported as pending so a new benchmark task visibly stops at formal-script registration.
+
+## Status mapping
+
+- `unused`: confirmed appearance count is 0.
+- `used`: confirmed appearance count is 1 to 3.
+- `near-limit`: confirmed appearance count is 4 or 5.
+- `excluded`: confirmed appearance count is 6 or higher.
+- `stale`: a pipeline stage says `passed` while also containing `invalidated_by`.
+
+The dashboard only visualizes state. It must not increment usage counts, confirm a project, alter matches, or mark audits as passed.

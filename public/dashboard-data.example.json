@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T12:00:00+08:00",
+  "source": "demo",
+  "summary": {
+    "assetTotal": 128,
+    "usedAssetTotal": 42,
+    "nearLimitTotal": 5,
+    "excludedTotal": 2,
+    "projectTotal": 16,
+    "outputTotal": 12
+  },
+  "assets": [
+    {
+      "id": "demo-1",
+      "name": "sunshade-install-01.mp4",
+      "relativePath": "assets/product/sunshade-install-01.mp4",
+      "collection": "遮阳挡安装",
+      "product": "前挡遮阳挡",
+      "category": "安装动作",
+      "description": "从驾驶位展开遮阳挡，展示完整安装动作。",
+      "thumbnail": null,
+      "usageCount": 2,
+      "usageStatus": "used",
+      "lastUsedAt": "2026-08-12T16:30:00+08:00",
+      "duration": 6.4,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "id": "demo-2",
+      "name": "sunshade-detail-03.mp4",
+      "relativePath": "assets/product/sunshade-detail-03.mp4",
+      "collection": "遮阳挡细节",
+      "product": "前挡遮阳挡",
+      "category": "材质细节",
+      "description": "近景展示银色反光面、黑色包边和折叠纹理。",
+      "thumbnail": null,
+      "usageCount": 4,
+      "usageStatus": "near-limit",
+      "lastUsedAt": "2026-08-13T11:20:00+08:00",
+      "duration": 4.8,
+      "width": 3840,
+      "height": 2160
+    }
+  ],
+  "projects": [
+    {
+      "id": "demo-project",
+      "folder": "2026-08-15-demo",
+      "title": "遮阳挡横屏重制",
+      "date": "2026-08-15",
+      "reference": {"name": "reference-demo.mp4", "poster": null},
+      "output": {"exists": true, "name": "remix.mp4", "poster": null},
+      "reviewBoard": null,
+      "shotCount": 19,
+      "matchedCount": 19,
+      "missingCount": 0,
+      "auditStatus": "completed",
+      "auditDecision": "pass",
+      "packageStatus": "ready_for_user_review",
+      "canvas": {"orientation": "landscape", "width": 1920, "height": 1080, "fps": 60},
+      "stages": [
+        {"name": "intake", "status": "passed", "updatedAt": "2026-08-15T10:00:00+08:00"},
+        {"name": "dissect", "status": "passed", "updatedAt": "2026-08-15T10:05:00+08:00"},
+        {"name": "match", "status": "passed", "updatedAt": "2026-08-15T10:20:00+08:00"},
+        {"name": "render", "status": "passed", "updatedAt": "2026-08-15T10:35:00+08:00"},
+        {"name": "audit_visual", "status": "passed", "updatedAt": "2026-08-15T10:42:00+08:00"}
+      ]
+    }
+  ]
+}
