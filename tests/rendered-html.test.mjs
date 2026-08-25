@@ -25,18 +25,21 @@ async function render() {
   );
 }
 
-test("server-renders the local video dashboard", async () => {
+test("server-renders the local shot splitter", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>爆款素材工作台<\/title>/i);
-  assert.match(html, /正在读取素材库和视频任务/);
+  assert.match(html, /<title>爆款视频拆镜头<\/title>/i);
+  assert.match(html, /导入爆款视频/);
+  assert.match(html, /原视频预览/);
+  assert.match(html, /分镜九宫格/);
+  assert.match(html, /开始拆解视频/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/);
 });
 
-test("removes starter markers and ignores local project snapshots", async () => {
+test("contains upload, storyboard pagination and clip preview wiring", async () => {
   const [css, page, layout, packageJson, gitignore] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -45,14 +48,21 @@ test("removes starter markers and ignores local project snapshots", async () => 
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /dashboard-data\.json/);
-  assert.match(page, /素材库/);
-  assert.match(page, /新建爆款任务/);
-  assert.match(page, /创建并开始拆解/);
-  assert.match(page, /待提供正式文案/);
-  assert.match(layout, /title:\s*"爆款素材工作台"/);
-  assert.match(css, /\.asset-grid/);
-  assert.match(css, /\.drop-zone/);
+  assert.match(page, /\/api\/tasks/);
+  assert.match(page, /\/api\/storyboard\/latest/);
+  assert.match(page, /\/api\/media/);
+  assert.match(page, /开始拆解视频/);
+  assert.match(page, /slice\(\(page - 1\) \* 9, page \* 9\)/);
+  assert.match(page, /selectedShot\.clipPath/);
+  assert.match(page, /CompositionGrid/);
+  assert.match(page, /构图九宫格/);
+  assert.match(layout, /title:\s*"爆款视频拆镜头"/);
+  assert.match(css, /\.shot-grid/);
+  assert.match(css, /\.drop-button/);
+  assert.match(css, /\.pagination/);
+  assert.match(css, /\.shot-dialog/);
+  assert.match(css, /\.composition-grid/);
+  assert.match(css, /\.grid-line\.vertical/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(gitignore, /public\/dashboard-data\.json/);
   assert.match(gitignore, /public\/local-media/);

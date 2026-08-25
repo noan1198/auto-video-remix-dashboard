@@ -1,8 +1,6 @@
-# Auto Video Remix Dashboard
+# 爆款视频镜头分割 Skill
 
-一个以 Codex skill 形式安装、在用户电脑上运行的视频素材工作台。GitHub 只分发程序，素材、对标视频、配音和成片不会上传到云端。
-
-网页会显示素材缩略图、已确认的使用次数、复用上限、本次对标视频、选片审核图、成片和流程状态。左侧的“新建爆款任务”可以接收 MP4、MOV 或 M4V 视频，在本机建立新的日期任务并开始拆解镜头。
+把一条参考视频交给 Codex，自动识别镜头切换，并生成一个以原视频命名的镜头分割文件夹。视频只在用户电脑上处理，不会上传到这个 GitHub 仓库。
 
 ## 安装
 
@@ -12,26 +10,69 @@
 安装 https://github.com/noan1198/auto-video-remix-dashboard 这个 Skill
 ```
 
-这个仓库提供网页工作台，不包含作者的素材库和私人项目文件。当前版本适用于已有的 Auto Video Remix 项目，项目中需要存在 `assets/`、`work/`、`tools/run_pipeline.py`、`tools/decompose_reference.py` 和 `bin/ffmpeg`。
-
-## 安装后使用
-
-在 Codex 中安装这个仓库后，在一个包含 `assets/` 和 `work/` 的视频项目里说：
+安装完成后的下一条对话，把视频拖入 Codex，然后发送：
 
 ```text
-打开爆款素材工作台
+把这个视频拆成镜头
 ```
 
-skill 会刷新本地数据并打开 `localhost` 网页。首次使用需要 Node.js 22.13 或更高版本，以及 pnpm 或 npm。Codex 桌面版在可用时会使用自带的 Node.js 运行环境。
+第一次处理视频时，如果电脑没有 FFmpeg，Codex 会请求下载一次本地视频组件。准备完成后，后续视频不需要重复下载。
 
-拖入对标视频后，程序只完成导入和镜头拆解。参考视频中的文案、原声、音乐不会自动进入新成片，任务会等待用户提供或确认正式文案。
+直接下载 GitHub ZIP 只会得到程序文件，不会自动运行。普通用户使用 Codex 的 GitHub Skill 安装方式最简单。
 
-## 本地开发
+## 得到什么
+
+假设原视频名是 `爆款视频一.mp4`，默认生成：
+
+```text
+爆款视频一镜头分割/
+├── 构图参考.html
+├── 分镜表.csv
+├── 分镜信息.json
+├── 使用说明.txt
+├── 镜头片段/
+│   ├── 镜头001.mp4
+│   ├── 镜头002.mp4
+│   └── ...
+└── 关键帧/
+    ├── 镜头001.jpg
+    ├── 镜头002.jpg
+    └── ...
+```
+
+双击 `构图参考.html`，每个镜头都可以独立播放。两条横线和两条竖线会叠在画面上，作为拍摄时的构图九宫格，并且可以随时关闭。
+
+## 能力范围
+
+- 支持 MP4、MOV、M4V、WEBM 和 MKV。
+- 自动标出每个镜头的开始时间、结束时间和持续时间。
+- 自动生成独立镜头视频、关键帧、CSV 分镜表和本地构图网页。
+- 镜头识别使用画面变化检测。转场、闪光、非常缓慢的镜头变化可能需要人工检查。
+- 只分析镜头结构和构图。参考视频中的文案、原声、音乐不会被提取后用于新视频。
+
+## 手动运行
+
+电脑已有 FFmpeg 时：
 
 ```bash
-pnpm install
-python3 scripts/export_dashboard_data.py --project-root /path/to/video-project
+python3 scripts/split_video.py /path/to/video.mp4
+```
+
+电脑没有 FFmpeg 时：
+
+```bash
+python3 scripts/prepare_splitter.py
+python3 scripts/split_video.py /path/to/video.mp4
+```
+
+使用 `--output-root` 可以指定镜头分割文件夹保存位置，使用 `--name` 可以修改输出名称。
+
+## 本机网页工作台
+
+仓库仍然保留适用于完整 Auto Video Remix 项目的 localhost 工作台。项目中存在 `assets/`、`work/` 和相应生产工具时，可以运行：
+
+```bash
 python3 scripts/launch_dashboard.py --project-root /path/to/video-project
 ```
 
-公开仓库中只保留 `public/dashboard-data.example.json`。`public/dashboard-data.json` 和 `public/local-media/` 由每个用户在本机生成，已加入 Git 忽略规则。
+GitHub 只分发程序。`dashboard-data.json`、本机视频、素材、配音、成片和绝对路径均已排除，不会提交到公开仓库。

@@ -2,141 +2,64 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type UsageStatus = "unused" | "used" | "near-limit" | "excluded";
+type Health = {
+  ok: boolean;
+  capabilities?: { referenceReady: boolean; assetCount: number };
+};
 
-type AssetRecord = {
-  id: string;
-  name: string;
-  relativePath: string;
-  collection: string;
-  product: string;
-  category: string;
-  description: string;
-  thumbnail: string | null;
-  usageCount: number;
-  usageStatus: UsageStatus;
-  lastUsedAt: string | null;
+type Shot = {
+  index: number;
+  start: number;
+  end: number;
+  duration: number;
+  keyframePath: string;
+  clipPath: string | null;
+};
+
+type Storyboard = {
+  ok: boolean;
+  folder: string;
+  title: string;
   duration: number;
   width: number;
   height: number;
-};
-
-type StageRecord = {
-  name: string;
-  status: string;
-  updatedAt: string | null;
-};
-
-type ProjectRecord = {
-  id: string;
-  folder: string;
-  title: string;
-  date: string;
-  taskStatus?: string;
-  reference: { name: string; poster: string | null };
-  output: { exists: boolean; name: string; poster: string | null };
-  reviewBoard: string | null;
-  shotCount: number;
-  matchedCount: number;
-  missingCount: number;
-  auditStatus: string;
-  auditDecision: string;
-  packageStatus: string;
-  canvas: { orientation?: string; width?: number; height?: number; fps?: number };
-  stages: StageRecord[];
-};
-
-type DashboardData = {
-  schemaVersion: number;
-  generatedAt: string;
-  source: string;
-  summary: {
-    assetTotal: number;
-    usedAssetTotal: number;
-    nearLimitTotal: number;
-    excludedTotal: number;
-    projectTotal: number;
-    outputTotal: number;
-  };
-  assets: AssetRecord[];
-  projects: ProjectRecord[];
+  fps: number;
+  referencePath: string;
+  shots: Shot[];
 };
 
 type UploadResult = {
   ok: boolean;
-  projectId: string;
   folder: string;
   title: string;
   shots: number;
   duration: number;
-  status: "waiting_for_script";
   error?: string;
 };
 
 const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://127.0.0.1:8765";
 
-const stageLabels: Record<string, string> = {
-  intake: "导入对标",
-  preflight: "生产检查",
-  dissect: "拆解镜头",
-  register_script: "登记文案",
-  match: "匹配素材",
-  voice: "整篇配音",
-  render: "生成成片",
-  audit_visual: "视觉去重",
-  audit_usage: "使用审核",
-  build_draft: "可编辑草稿",
-  validate: "最终验收",
-  package: "整理交付",
-};
-
-const usageLabels: Record<UsageStatus | "all", string> = {
-  all: "全部素材",
-  unused: "未使用",
-  used: "已使用",
-  "near-limit": "接近上限",
-  excluded: "已达上限",
-};
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "暂无记录";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+function formatSeconds(value: number) {
+  return `${value.toFixed(2)}s`;
 }
 
-function statusText(status: string) {
-  if (status === "passed" || status === "completed") return "已通过";
-  if (status === "stale") return "需重新检查";
-  if (status === "needs_review" || status === "pending") return "待审核";
-  if (status === "failed") return "未通过";
-  return status || "待处理";
+function mediaUrl(folder: string, path: string | null) {
+  if (!path) return "";
+  const query = new URLSearchParams({ folder, path });
+  return `${localApiUrl}/api/media?${query.toString()}`;
 }
 
-async function fetchDashboardData() {
-  for (const source of ["/dashboard-data.json", "/dashboard-data.example.json"]) {
-    try {
-      const response = await fetch(source, { cache: "no-store" });
-      if (!response.ok) continue;
-      return (await response.json()) as DashboardData;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error("网页数据没有生成");
+async function loadStoryboard(folder: string) {
+  const response = await fetch(`${localApiUrl}/api/storyboard?folder=${encodeURIComponent(folder)}`, {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as Storyboard & { error?: string };
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "分镜数据读取失败");
+  return payload;
 }
 
-function uploadBenchmark(
-  file: File,
-  title: string,
-  onProgress: (progress: number) => void,
-): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
+function uploadVideo(file: File, title: string, onProgress: (value: number) => void) {
+  return new Promise<UploadResult>((resolve, reject) => {
     const query = new URLSearchParams({ filename: file.name, title });
     const request = new XMLHttpRequest();
     request.open("POST", `${localApiUrl}/api/tasks?${query.toString()}`);
@@ -144,492 +67,315 @@ function uploadBenchmark(
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
     };
-    request.onerror = () => reject(new Error("本机视频接口没有启动，请重新打开这个 Skill"));
+    request.onerror = () => reject(new Error("本地拆解服务没有启动"));
     request.onload = () => {
-      let payload: UploadResult;
       try {
-        payload = JSON.parse(request.responseText) as UploadResult;
+        const payload = JSON.parse(request.responseText) as UploadResult;
+        if (request.status >= 200 && request.status < 300 && payload.ok) resolve(payload);
+        else reject(new Error(payload.error || "视频拆解失败"));
       } catch {
-        reject(new Error("本机视频接口返回了无法识别的结果"));
-        return;
+        reject(new Error("本地拆解服务返回了无法识别的内容"));
       }
-      if (request.status >= 200 && request.status < 300 && payload.ok) resolve(payload);
-      else reject(new Error(payload.error || "对标视频导入失败"));
     };
     request.send(file);
   });
 }
 
-function EmptyVisual({ label }: { label: string }) {
+function CompositionGrid({ visible }: { visible: boolean }) {
   return (
-    <div className="empty-visual" aria-label={label}>
-      <span className="empty-visual-mark" />
-      <span>{label}</span>
+    <div className={`composition-grid ${visible ? "visible" : ""}`} aria-hidden="true">
+      <span className="grid-line vertical first" />
+      <span className="grid-line vertical second" />
+      <span className="grid-line horizontal first" />
+      <span className="grid-line horizontal second" />
     </div>
   );
 }
 
-function VisualCard({
-  eyebrow,
-  title,
-  image,
-  detail,
-  tone,
-}: {
-  eyebrow: string;
-  title: string;
-  image: string | null;
-  detail: string;
-  tone: "yellow" | "blue" | "green";
-}) {
-  return (
-    <article className={`visual-card visual-card-${tone}`}>
-      <div className="visual-card-head">
-        <span>{eyebrow}</span>
-        <small>{detail}</small>
-      </div>
-      <div className="visual-frame">
-        {image ? <img src={image} alt={title} loading="lazy" /> : <EmptyVisual label="待生成缩略图" />}
-      </div>
-      <h3>{title}</h3>
-    </article>
-  );
-}
-
 export default function Home() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loadingError, setLoadingError] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [query, setQuery] = useState("");
-  const [usageFilter, setUsageFilter] = useState<UsageStatus | "all">("all");
-  const [assetPage, setAssetPage] = useState(1);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [benchmarkFile, setBenchmarkFile] = useState<File | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [serviceReady, setServiceReady] = useState<boolean | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
-  const [dragActive, setDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "analyzing" | "done" | "error">("idle");
-  const [uploadMessage, setUploadMessage] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "uploading" | "analyzing" | "done" | "error">("idle");
+  const [progress, setProgress] = useState(0);
+  const [message, setMessage] = useState("选择一条爆款视频，系统会识别每一次镜头切换");
+  const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
+  const [page, setPage] = useState(1);
+  const [selectedShot, setSelectedShot] = useState<Shot | null>(null);
+  const [compositionGridVisible, setCompositionGridVisible] = useState(true);
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false;
+    async function initialize() {
       try {
-        const payload = await fetchDashboardData();
-        setData(payload);
-        setSelectedProjectId(payload.projects[0]?.id ?? "");
+        const response = await fetch(`${localApiUrl}/api/health`, { cache: "no-store" });
+        const payload = (await response.json()) as Health;
+        if (!cancelled) setServiceReady(Boolean(response.ok && payload.ok && payload.capabilities?.referenceReady));
       } catch {
-        setLoadingError(true);
+        if (!cancelled) setServiceReady(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${localApiUrl}/api/storyboard/latest`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as Storyboard;
+        if (!cancelled) {
+          setStoryboard(payload);
+          setMessage(`最近一次任务识别出 ${payload.shots.length} 个镜头`);
+        }
+      } catch {
+        return;
       }
     }
-    load();
+    initialize();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function chooseBenchmark(file: File | null) {
-    if (!file) return;
-    if (!/\.(mp4|mov|m4v)$/i.test(file.name)) {
-      setUploadStatus("error");
-      setUploadMessage("请选择 MP4、MOV 或 M4V 视频");
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function selectFile(nextFile: File | null) {
+    if (!nextFile) return;
+    if (!/\.(mp4|mov|m4v)$/i.test(nextFile.name)) {
+      setPhase("error");
+      setMessage("请选择 MP4、MOV 或 M4V 视频");
       return;
     }
-    setBenchmarkFile(file);
-    setTaskTitle((current) => current || file.name.replace(/\.[^.]+$/, ""));
-    setUploadStatus("idle");
-    setUploadMessage("");
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setFile(nextFile);
+    setPreviewUrl(URL.createObjectURL(nextFile));
+    setTaskTitle(nextFile.name.replace(/\.[^.]+$/, ""));
+    setPhase("idle");
+    setProgress(0);
+    setMessage("视频已经准备好，点击开始拆解");
   }
 
-  async function createBenchmarkTask() {
-    if (!benchmarkFile || uploadStatus === "uploading" || uploadStatus === "analyzing") return;
-    setUploadStatus("uploading");
-    setUploadProgress(0);
-    setUploadMessage("正在把视频保存到新的本地任务文件夹");
+  async function startSplit() {
+    if (!file || !serviceReady || phase === "uploading" || phase === "analyzing") return;
+    setPhase("uploading");
+    setProgress(0);
+    setMessage("正在把视频送入本地拆解任务");
     try {
-      const result = await uploadBenchmark(benchmarkFile, taskTitle.trim(), (progress) => {
-        setUploadProgress(progress);
-        if (progress >= 100) {
-          setUploadStatus("analyzing");
-          setUploadMessage("视频已保存，正在拆解镜头和节奏");
+      const result = await uploadVideo(file, taskTitle.trim(), (value) => {
+        setProgress(value);
+        if (value >= 100) {
+          setPhase("analyzing");
+          setMessage("视频已导入，正在识别镜头切点并生成分段视频");
         }
       });
-      const payload = await fetchDashboardData();
-      setData(payload);
-      setSelectedProjectId(result.projectId);
-      setUploadStatus("done");
-      setUploadMessage(`已拆出 ${result.shots} 个镜头，下一步需要提供正式文案`);
+      const payload = await loadStoryboard(result.folder);
+      setStoryboard(payload);
+      setPage(1);
+      setSelectedShot(null);
+      setPhase("done");
+      setMessage(`拆解完成，共识别 ${payload.shots.length} 个镜头`);
     } catch (error) {
-      setUploadStatus("error");
-      setUploadMessage(error instanceof Error ? error.message : "对标视频导入失败");
+      setPhase("error");
+      setMessage(error instanceof Error ? error.message : "视频拆解失败");
     }
   }
 
-  const selectedProject = useMemo(
-    () => data?.projects.find((project) => project.id === selectedProjectId) ?? data?.projects[0] ?? null,
-    [data, selectedProjectId],
+  const pageCount = Math.max(1, Math.ceil((storyboard?.shots.length || 0) / 9));
+  const visibleShots = useMemo(
+    () => storyboard?.shots.slice((page - 1) * 9, page * 9) || [],
+    [storyboard, page],
   );
-
-  const filteredAssets = useMemo(() => {
-    if (!data) return [];
-    const normalized = query.trim().toLowerCase();
-    return data.assets.filter((asset) => {
-      const statusMatches = usageFilter === "all" || asset.usageStatus === usageFilter;
-      const queryMatches =
-        !normalized ||
-        [asset.name, asset.collection, asset.category, asset.description, asset.product]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalized);
-      return statusMatches && queryMatches;
-    });
-  }, [data, query, usageFilter]);
-
-  const visibleAssets = filteredAssets.slice(0, assetPage * 24);
-
-  if (loadingError) {
-    return <main className="load-state">网页数据没有生成，请先导出本地工作台数据。</main>;
-  }
-
-  if (!data || !selectedProject) {
-    return <main className="load-state">正在读取素材库和视频任务……</main>;
-  }
-
-  const progress = selectedProject.shotCount
-    ? Math.round((selectedProject.matchedCount / selectedProject.shotCount) * 100)
+  const averageDuration = storyboard?.shots.length
+    ? storyboard.shots.reduce((sum, shot) => sum + shot.duration, 0) / storyboard.shots.length
     : 0;
 
   return (
-    <main className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <span className="brand-glyph">M</span>
-          <div>
-            <strong>爆款素材工作台</strong>
-            <small>Auto Video Remix</small>
-          </div>
+    <main className="splitter-page">
+      <header className="site-header">
+        <div className="brand-mark">CUT</div>
+        <div className="brand-copy">
+          <strong>爆款视频拆镜头</strong>
+          <span>本地运行，视频保留在你的电脑中</span>
         </div>
-
-        <button className="new-task-card" type="button" aria-label="新建爆款任务" onClick={() => setCreateOpen(true)}>
-          <span className="new-task-plus">+</span>
-          <span>
-            <strong>新建爆款任务</strong>
-            <small>拖入今天的对标视频</small>
-          </span>
-        </button>
-
-        <nav className="side-nav" aria-label="工作台导航">
-          <a className="active" href="#overview"><span>01</span>本次任务</a>
-          <a href="#assets"><span>02</span>素材库</a>
-          <a href="#projects"><span>03</span>历史成片</a>
-        </nav>
-
-        <div className="sidebar-note">
-          <span className={`source-dot ${data.source === "demo" ? "demo" : ""}`} />
-          <div>
-            <strong>{data.source === "demo" ? "演示数据" : "本地数据已连接"}</strong>
-            <small>更新于 {formatDate(data.generatedAt)}</small>
-          </div>
+        <div className={`service-state ${serviceReady ? "ready" : serviceReady === false ? "offline" : "checking"}`}>
+          <i />
+          {serviceReady ? "拆解服务已连接" : serviceReady === false ? "拆解服务未启动" : "正在连接拆解服务"}
         </div>
-      </aside>
+      </header>
 
-      <section className="dashboard-content">
-        <header className="topbar" id="overview">
-          <div>
-            <p className="eyebrow">今天的视频生产</p>
-            <h1>{selectedProject.title}</h1>
-          </div>
-          <div className="top-actions">
-            <label className="project-select-label">
-              <span>切换任务</span>
-              <select value={selectedProject.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
-                {data.projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.date}  {project.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="primary-button" type="button" onClick={() => document.querySelector("#workflow")?.scrollIntoView({ behavior: "smooth" })}>
-              查看制作进度
-            </button>
-          </div>
-        </header>
-
-        <section className="summary-grid" aria-label="素材库统计">
-          <article>
-            <span>素材总数</span>
-            <strong>{data.summary.assetTotal}</strong>
-            <small>{data.summary.usedAssetTotal} 条进入过成片</small>
-          </article>
-          <article>
-            <span>接近复用上限</span>
-            <strong>{data.summary.nearLimitTotal}</strong>
-            <small>第 4 至 5 次使用会降低排名</small>
-          </article>
-          <article>
-            <span>已生成成片</span>
-            <strong>{data.summary.outputTotal}</strong>
-            <small>共 {data.summary.projectTotal} 个视频任务</small>
-          </article>
-          <article className="accent-stat">
-            <span>本次素材匹配</span>
-            <strong>{selectedProject.matchedCount}/{selectedProject.shotCount}</strong>
-            <small>{progress}% 镜头已找到素材</small>
-          </article>
-        </section>
-
-        <section className="project-stage" id="workflow">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">从对标到成片</p>
-              <h2>本次视频一屏对照</h2>
-            </div>
-            <div className="project-facts">
-              <span>{selectedProject.canvas.width || "?"}×{selectedProject.canvas.height || "?"}</span>
-              <span>{selectedProject.canvas.fps || "?"} FPS</span>
-              {selectedProject.taskStatus === "waiting_for_script" && (
-                <span className="status-chip status-script">待提供正式文案</span>
-              )}
-              <span className={`status-chip status-${selectedProject.auditDecision}`}>
-                视觉审核 {statusText(selectedProject.auditDecision)}
-              </span>
-            </div>
-          </div>
-
-          <div className="visual-comparison">
-            <VisualCard
-              eyebrow="对标爆款"
-              title={selectedProject.reference.name}
-              image={selectedProject.reference.poster}
-              detail="只参考镜头结构与节奏"
-              tone="yellow"
-            />
-            <VisualCard
-              eyebrow="本次选片"
-              title={`${selectedProject.matchedCount} 个镜头已匹配`}
-              image={selectedProject.reviewBoard}
-              detail={`${selectedProject.missingCount} 个缺口`}
-              tone="blue"
-            />
-            <VisualCard
-              eyebrow="生成成片"
-              title={selectedProject.output.name}
-              image={selectedProject.output.poster}
-              detail={selectedProject.output.exists ? "已生成本地成片" : "等待生成"}
-              tone="green"
-            />
-          </div>
-
-          <div className="stage-strip" aria-label="视频生产流程">
-            {selectedProject.stages.map((stage, index) => (
-              <div className={`stage-item stage-${stage.status}`} key={stage.name}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <div>
-                  <strong>{stageLabels[stage.name] || stage.name}</strong>
-                  <small>
-                    {stage.name === "register_script" && stage.status === "pending" && selectedProject.taskStatus === "waiting_for_script"
-                      ? "待提供正式文案"
-                      : statusText(stage.status)}
-                  </small>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="asset-section" id="assets">
-          <div className="section-heading asset-heading">
-            <div>
-              <p className="eyebrow">素材库</p>
-              <h2>看画面，也看它已经用了几次</h2>
-            </div>
-            <label className="search-field">
-              <span className="visually-hidden">搜索素材</span>
-              <span className="search-icon" />
-              <input
-                type="search"
-                placeholder="搜索场景、动作、产品或文件名"
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setAssetPage(1);
-                }}
-              />
-            </label>
-          </div>
-
-          <div className="filter-row" role="group" aria-label="按素材使用次数筛选">
-            {(Object.keys(usageLabels) as Array<UsageStatus | "all">).map((status) => (
-              <button
-                className={usageFilter === status ? "active" : ""}
-                key={status}
-                type="button"
-                onClick={() => {
-                  setUsageFilter(status);
-                  setAssetPage(1);
-                }}
-              >
-                {usageLabels[status]}
-              </button>
-            ))}
-            <span>{filteredAssets.length} 条结果</span>
-          </div>
-
-          <div className="asset-grid">
-            {visibleAssets.map((asset) => (
-              <article className="asset-card" key={asset.id}>
-                <div className="asset-image">
-                  {asset.thumbnail ? <img src={asset.thumbnail} alt={asset.description} loading="lazy" /> : <EmptyVisual label="待生成缩略图" />}
-                  <span className={`usage-badge usage-${asset.usageStatus}`}>
-                    {asset.usageCount === 0 ? "还没用过" : `已用 ${asset.usageCount} 次`}
-                  </span>
-                  {asset.duration > 0 && <span className="duration-badge">{asset.duration.toFixed(1)}s</span>}
-                </div>
-                <div className="asset-body">
-                  <div className="asset-meta">
-                    <span>{asset.category}</span>
-                    <small>{asset.collection}</small>
-                  </div>
-                  <h3>{asset.description}</h3>
-                  <p title={asset.name}>{asset.name}</p>
-                  <div className="usage-meter" aria-label={`素材已使用 ${asset.usageCount} 次`}>
-                    {Array.from({ length: 6 }).map((_, index) => (
-                      <span className={index < asset.usageCount ? "filled" : ""} key={index} />
-                    ))}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-
-          {visibleAssets.length < filteredAssets.length && (
-            <button className="load-more" type="button" onClick={() => setAssetPage((value) => value + 1)}>
-              再显示 24 条素材
-            </button>
-          )}
-        </section>
-
-        <section className="history-section" id="projects">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">历史任务</p>
-              <h2>每条成片都能追回对标和选片</h2>
-            </div>
-          </div>
-          <div className="history-list">
-            {data.projects.slice(0, 12).map((project) => (
-              <button
-                className={project.id === selectedProject.id ? "active" : ""}
-                key={project.id}
-                type="button"
-                onClick={() => {
-                  setSelectedProjectId(project.id);
-                  document.querySelector("#overview")?.scrollIntoView({ behavior: "smooth" });
-                }}
-              >
-                <span>{project.date}</span>
-                <strong>{project.title}</strong>
-                <small>{project.matchedCount}/{project.shotCount} 镜头</small>
-                <em>{project.output.exists ? "有成片" : "制作中"}</em>
-              </button>
-            ))}
-          </div>
-        </section>
+      <section className="hero">
+        <div>
+          <p className="hero-kicker">SHOT DETECTION</p>
+          <h1>把一条爆款视频<br />拆成完整分镜九宫格</h1>
+        </div>
+        <p className="hero-note">自动识别每一次画面切换，生成镜头编号、时间范围、关键帧和独立视频片段。</p>
       </section>
 
-      {createOpen && (
-        <div className="modal-backdrop" role="presentation">
-          <section className="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-task-title">
-            <div className="create-modal-head">
-              <div>
-                <p className="eyebrow">新的对标爆款</p>
-                <h2 id="create-task-title">拖入视频，建立今天的任务</h2>
-              </div>
-              <button
-                className="modal-close"
-                type="button"
-                aria-label="关闭"
-                disabled={uploadStatus === "uploading" || uploadStatus === "analyzing"}
-                onClick={() => setCreateOpen(false)}
-              >
-                ×
-              </button>
+      <section className="workbench">
+        <div
+          className={`upload-panel ${dragging ? "dragging" : ""} ${file ? "has-file" : ""}`}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            selectFile(event.dataTransfer.files[0] || null);
+          }}
+        >
+          <div className="step-label"><span>01</span>导入爆款视频</div>
+          <button className="drop-button" type="button" onClick={() => inputRef.current?.click()}>
+            <span className="drop-symbol">{file ? "✓" : "+"}</span>
+            <strong>{file ? file.name : "把视频拖到这里"}</strong>
+            <small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB，点击可以重新选择` : "支持 MP4、MOV 和 M4V"}</small>
+          </button>
+          <input
+            ref={inputRef}
+            className="hidden-input"
+            type="file"
+            accept="video/mp4,video/quicktime,.m4v"
+            onChange={(event) => selectFile(event.target.files?.[0] || null)}
+          />
+          <label className="title-field">
+            <span>任务名称</span>
+            <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="输入这条视频的名称" />
+          </label>
+          <button
+            className="split-button"
+            type="button"
+            disabled={!file || !serviceReady || phase === "uploading" || phase === "analyzing"}
+            onClick={startSplit}
+          >
+            {phase === "uploading" ? `正在导入 ${progress}%` : phase === "analyzing" ? "正在拆解镜头" : "开始拆解视频"}
+          </button>
+          <div className={`process-message ${phase}`}>
+            <div className="progress-track">
+              <span style={{ width: `${phase === "analyzing" || phase === "done" ? 100 : progress}%` }} />
             </div>
+            <p>{message}</p>
+          </div>
+        </div>
 
+        <div className="preview-panel">
+          <div className="step-label"><span>02</span>原视频预览</div>
+          <div className="video-frame">
+            {previewUrl ? (
+              // Source previews do not have a separate caption file.
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video src={previewUrl} controls playsInline />
+            ) : storyboard?.referencePath ? (
+              // Source previews do not have a separate caption file.
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video src={mediaUrl(storyboard.folder, storyboard.referencePath)} controls playsInline />
+            ) : (
+              <div className="video-empty"><span>等待视频</span></div>
+            )}
+          </div>
+          <div className="preview-caption">
+            <strong>{file?.name || storyboard?.title || "还没有选择视频"}</strong>
+            <span>{storyboard ? `${formatSeconds(storyboard.duration)} · ${storyboard.width}×${storyboard.height}` : "选择视频后会在这里播放"}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="storyboard-section">
+        <div className="storyboard-heading">
+          <div>
+            <div className="step-label"><span>03</span>分镜九宫格</div>
+            <h2>{storyboard ? `共识别 ${storyboard.shots.length} 个镜头` : "等待生成分镜"}</h2>
+          </div>
+          {storyboard && (
+            <div className="storyboard-actions">
+              <button
+                className={`composition-toggle ${compositionGridVisible ? "active" : ""}`}
+                type="button"
+                aria-pressed={compositionGridVisible}
+                onClick={() => setCompositionGridVisible((value) => !value)}
+              >
+                <span className="toggle-grid-icon" aria-hidden="true" />
+                构图九宫格 {compositionGridVisible ? "已显示" : "已隐藏"}
+              </button>
+              <div className="result-stats">
+                <span><small>视频时长</small>{formatSeconds(storyboard.duration)}</span>
+                <span><small>镜头数量</small>{storyboard.shots.length}</span>
+                <span><small>平均镜头</small>{formatSeconds(averageDuration)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className={`shot-grid ${visibleShots.length ? "has-results" : ""}`}>
+          {visibleShots.length
+            ? visibleShots.map((shot) => (
+                <button className="shot-card" type="button" key={shot.index} onClick={() => setSelectedShot(shot)}>
+                  <div className="shot-image">
+                    <img src={mediaUrl(storyboard!.folder, shot.keyframePath)} alt={`镜头 ${shot.index} 关键帧`} />
+                    <CompositionGrid visible={compositionGridVisible} />
+                    <span className="shot-number">{String(shot.index).padStart(2, "0")}</span>
+                    <span className="shot-play">▶</span>
+                  </div>
+                  <div className="shot-meta">
+                    <strong>镜头 {String(shot.index).padStart(2, "0")}</strong>
+                    <span>{formatSeconds(shot.start)} → {formatSeconds(shot.end)}</span>
+                    <em>{formatSeconds(shot.duration)}</em>
+                  </div>
+                </button>
+              ))
+            : Array.from({ length: 9 }).map((_, index) => (
+                <div className="shot-placeholder" key={index}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                </div>
+              ))}
+        </div>
+
+        {storyboard && pageCount > 1 && (
+          <div className="pagination">
+            <button type="button" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>上一组</button>
+            <span>第 {page} 组，共 {pageCount} 组</span>
+            <button type="button" disabled={page === pageCount} onClick={() => setPage((value) => value + 1)}>下一组</button>
+          </div>
+        )}
+      </section>
+
+      {selectedShot && storyboard && (
+        <div
+          className="shot-dialog-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSelectedShot(null);
+          }}
+        >
+          <section className="shot-dialog" role="dialog" aria-modal="true">
             <button
-              className={`drop-zone ${dragActive ? "active" : ""} ${benchmarkFile ? "has-file" : ""}`}
+              className={`dialog-grid-toggle ${compositionGridVisible ? "active" : ""}`}
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragActive(false);
-                chooseBenchmark(event.dataTransfer.files[0] || null);
-              }}
+              aria-pressed={compositionGridVisible}
+              onClick={() => setCompositionGridVisible((value) => !value)}
             >
-              <span className="drop-icon">{benchmarkFile ? "✓" : "+"}</span>
-              <strong>{benchmarkFile ? benchmarkFile.name : "把爆款视频拖到这里"}</strong>
-              <small>
-                {benchmarkFile
-                  ? `${(benchmarkFile.size / 1024 / 1024).toFixed(1)} MB，点击可以重新选择`
-                  : "也可以点击选择 MP4、MOV 或 M4V 视频"}
-              </small>
+              构图九宫格 {compositionGridVisible ? "开" : "关"}
             </button>
-            <input
-              ref={fileInputRef}
-              className="hidden-file-input"
-              type="file"
-              accept="video/mp4,video/quicktime,.m4v"
-              onChange={(event) => chooseBenchmark(event.target.files?.[0] || null)}
-            />
-
-            <label className="task-title-field">
-              <span>任务名称</span>
-              <input
-                type="text"
-                maxLength={80}
-                placeholder="例如：今天的车载收纳爆款"
-                value={taskTitle}
-                onChange={(event) => setTaskTitle(event.target.value)}
-              />
-            </label>
-
-            <div className="reference-rule">
-              <strong>这一步只分析镜头结构和节奏</strong>
-              <span>参考视频的原文、原声不会直接用于新成片。拆解完成后，任务会停在“待提供正式文案”。</span>
+            <button className="dialog-close" type="button" aria-label="关闭" onClick={() => setSelectedShot(null)}>×</button>
+            <div className="dialog-video">
+              {selectedShot.clipPath ? (
+                // Reference clips do not have a separate caption file.
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video src={mediaUrl(storyboard.folder, selectedShot.clipPath)} controls autoPlay playsInline />
+              ) : (
+                <img src={mediaUrl(storyboard.folder, selectedShot.keyframePath)} alt={`镜头 ${selectedShot.index}`} />
+              )}
+              <CompositionGrid visible={compositionGridVisible} />
             </div>
-
-            {(uploadStatus === "uploading" || uploadStatus === "analyzing") && (
-              <div className="upload-progress" aria-live="polite">
-                <div><span style={{ width: `${uploadStatus === "analyzing" ? 100 : uploadProgress}%` }} /></div>
-                <small>{uploadMessage}</small>
-              </div>
-            )}
-
-            {(uploadStatus === "done" || uploadStatus === "error") && (
-              <p className={`upload-result ${uploadStatus}`} aria-live="polite">{uploadMessage}</p>
-            )}
-
-            <div className="create-modal-actions">
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={uploadStatus === "uploading" || uploadStatus === "analyzing"}
-                onClick={() => setCreateOpen(false)}
-              >
-                {uploadStatus === "done" ? "查看新任务" : "取消"}
-              </button>
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!benchmarkFile || uploadStatus === "uploading" || uploadStatus === "analyzing" || uploadStatus === "done"}
-                onClick={createBenchmarkTask}
-              >
-                {uploadStatus === "uploading" ? `正在上传 ${uploadProgress}%` : uploadStatus === "analyzing" ? "正在拆解视频" : "创建并开始拆解"}
-              </button>
+            <div className="dialog-copy">
+              <span>镜头 {String(selectedShot.index).padStart(2, "0")}</span>
+              <strong>{formatSeconds(selectedShot.start)} 到 {formatSeconds(selectedShot.end)}</strong>
+              <small>持续 {formatSeconds(selectedShot.duration)}</small>
             </div>
           </section>
         </div>

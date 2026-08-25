@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import mimetypes
 import re
 import subprocess
 import sys
@@ -18,6 +19,13 @@ from urllib.parse import parse_qs, urlparse
 
 
 SITE_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_ROOT = SITE_ROOT / "scripts"
+if str(SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_ROOT))
+
+from check_project import inspect_project
+
+
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v"}
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
@@ -38,6 +46,64 @@ def safe_label(value: str) -> str:
     label = re.sub(r"\s+", "-", label)
     label = re.sub(r"-+", "-", label).strip("-. ")
     return label[:48] or "新爆款"
+
+
+def resolve_work_file(project_root: Path, folder: str, relative_path: str) -> Path:
+    work_root = (project_root / "work").resolve()
+    candidate = (work_root / folder / relative_path).resolve()
+    if work_root not in candidate.parents or not candidate.is_file():
+        raise FileNotFoundError("文件不存在")
+    return candidate
+
+
+def storyboard_payload(project_root: Path, folder: str) -> dict[str, Any]:
+    work_root = (project_root / "work").resolve()
+    work_dir = (work_root / folder).resolve()
+    if work_root not in work_dir.parents or not work_dir.is_dir():
+        raise FileNotFoundError("任务不存在")
+
+    recipe_path = work_dir / "recipe.json"
+    if not recipe_path.is_file():
+        raise FileNotFoundError("任务还没有生成分镜数据")
+    recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+    task_path = work_dir / "dashboard_task.json"
+    task = json.loads(task_path.read_text(encoding="utf-8")) if task_path.is_file() else {}
+    shots = []
+    for raw in recipe.get("shots") or []:
+        index = int(raw.get("index") or len(shots) + 1)
+        clip_path = str(raw.get("clip_path") or f"video_clips/fragment{index:03d}.mp4")
+        keyframe_path = str(raw.get("keyframe_path") or "")
+        shots.append(
+            {
+                "index": index,
+                "start": float(raw.get("start") or 0),
+                "end": float(raw.get("end") or 0),
+                "duration": float(raw.get("duration") or 0),
+                "keyframePath": keyframe_path,
+                "clipPath": clip_path if (work_dir / clip_path).is_file() else None,
+            }
+        )
+
+    video = recipe.get("video") or {}
+    return {
+        "ok": True,
+        "folder": folder,
+        "title": str(task.get("title") or recipe.get("label") or folder),
+        "duration": float(video.get("duration") or 0),
+        "width": int(video.get("width") or 0),
+        "height": int(video.get("height") or 0),
+        "fps": float(video.get("fps") or 0),
+        "referencePath": str(recipe.get("reference_video") or ""),
+        "shots": shots,
+    }
+
+
+def latest_storyboard_folder(project_root: Path) -> str:
+    recipes = [path for path in (project_root / "work").glob("*/recipe.json") if path.is_file()]
+    if not recipes:
+        raise FileNotFoundError("还没有完成过视频拆解")
+    latest = max(recipes, key=lambda path: path.stat().st_mtime_ns)
+    return latest.parent.name
 
 
 def unique_work_dir(project_root: Path, requested_label: str, task_date: str) -> tuple[str, Path]:
@@ -161,7 +227,7 @@ def task_config(width: int, height: int) -> dict[str, Any]:
             "speed_ratio": 1.2,
         },
         "captions": {"mode": "srt", "alignment": "continuous_voice"},
-        "draft": {"target": "none", "mode": "pending_user_choice", "one_clip_per_shot": True},
+        "draft": {"target": "jianying", "mode": "native_batch_import", "one_clip_per_shot": True},
     }
 
 
@@ -282,6 +348,52 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_media(self, path: Path) -> None:
+        size = path.stat().st_size
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        range_header = self.headers.get("Range")
+        start = 0
+        end = size - 1
+        status = 200
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+            if match:
+                if match.group(1):
+                    start = int(match.group(1))
+                if match.group(2):
+                    end = min(int(match.group(2)), size - 1)
+                if start <= end < size:
+                    status = 206
+                else:
+                    self.send_error(416)
+                    return
+
+        length = end - start + 1
+        self.send_response(status)
+        origin = self.allowed_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        with path.open("rb") as handle:
+            handle.seek(start)
+            remaining = length
+            try:
+                while remaining:
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
     def do_OPTIONS(self) -> None:
         if self.allowed_origin() == "":
             self.send_json(403, {"ok": False, "error": "不允许的网页来源"})
@@ -298,7 +410,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json(200, {"ok": True, "projectId": project_id(self.project_root)})
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "projectId": project_id(self.project_root),
+                    "capabilities": inspect_project(self.project_root),
+                },
+            )
+            return
+        if parsed.path == "/api/storyboard":
+            query = parse_qs(parsed.query)
+            folder = (query.get("folder") or [""])[0]
+            try:
+                self.send_json(200, storyboard_payload(self.project_root, folder))
+            except FileNotFoundError as error:
+                self.send_json(404, {"ok": False, "error": str(error)})
+            except Exception as error:
+                self.send_json(500, {"ok": False, "error": str(error)})
+            return
+        if parsed.path == "/api/storyboard/latest":
+            try:
+                folder = latest_storyboard_folder(self.project_root)
+                self.send_json(200, storyboard_payload(self.project_root, folder))
+            except FileNotFoundError as error:
+                self.send_json(404, {"ok": False, "error": str(error)})
+            except Exception as error:
+                self.send_json(500, {"ok": False, "error": str(error)})
+            return
+        if parsed.path == "/api/media":
+            query = parse_qs(parsed.query)
+            folder = (query.get("folder") or [""])[0]
+            relative_path = (query.get("path") or [""])[0]
+            try:
+                self.send_media(resolve_work_file(self.project_root, folder, relative_path))
+            except FileNotFoundError:
+                self.send_error(404)
             return
         if parsed.path == "/api/refresh":
             try:
@@ -316,6 +463,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path != "/api/tasks":
             self.send_json(404, {"ok": False, "error": "接口不存在"})
+            return
+        capabilities = inspect_project(self.project_root)
+        if not capabilities["referenceReady"]:
+            missing = "、".join(capabilities["missing"]["reference"])
+            self.send_json(409, {"ok": False, "error": f"当前项目不能拆解对标视频，缺少：{missing}"})
             return
         query = parse_qs(parsed.query)
         original_name = (query.get("filename") or [""])[0]
@@ -366,7 +518,7 @@ def main() -> int:
     args = parser.parse_args()
 
     project_root = args.project_root.expanduser().resolve()
-    missing = [name for name in ("assets", "work", "tools") if not (project_root / name).is_dir()]
+    missing = [name for name in ("assets", "work") if not (project_root / name).is_dir()]
     if missing:
         raise RuntimeError(f"项目目录缺少: {', '.join(missing)}")
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)

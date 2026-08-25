@@ -38,6 +38,7 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+/.splitter-runtime/
 
 # Local project snapshots. Public repositories keep only the sanitized example.
 /public/dashboard-data.json

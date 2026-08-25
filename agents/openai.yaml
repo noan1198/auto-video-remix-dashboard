@@ -1,4 +1,4 @@
 interface:
-  display_name: "爆款素材工作台"
-  short_description: "在本机网页中导入对标视频，并查看素材复用次数、制作进度和成片"
-  default_prompt: "Use $auto-video-remix-dashboard to open the local video material dashboard and create a dated task when I drag in a new benchmark video."
+  display_name: "爆款视频镜头分割"
+  short_description: "把参考视频拆成独立镜头，并生成带构图九宫格的本地网页"
+  default_prompt: "Use $auto-video-remix-dashboard to split the video I provide into a clearly named local folder with independent clips, keyframes, timing data, and a composition-grid HTML report."
