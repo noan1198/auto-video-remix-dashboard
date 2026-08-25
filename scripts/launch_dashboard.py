@@ -133,24 +133,19 @@ def stop_process(process: subprocess.Popen[str] | None) -> None:
         process.kill()
 
 
-def existing_server_url() -> str | None:
-    lock_path = SITE_ROOT / ".vinext" / "dev" / "lock.json"
-    if not lock_path.is_file():
-        return None
-    try:
-        lock = json.loads(lock_path.read_text(encoding="utf-8"))
-        pid = int(lock.get("pid"))
-        port = int(lock.get("port"))
-        hostname = str(lock.get("hostname") or "localhost")
+def wait_for_frontend(url: str, process: subprocess.Popen[str], timeout: float = 30.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("本地网页启动失败")
         try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return None
-        except PermissionError:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                if response.status < 500:
+                    return
+        except (OSError, urllib.error.URLError):
             pass
-        return str(lock.get("appUrl") or f"http://{hostname}:{port}")
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return None
+        time.sleep(0.2)
+    raise RuntimeError("本地网页没有按时响应")
 
 
 def main() -> int:
@@ -159,6 +154,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=3000)
     parser.add_argument("--api-port", type=int, default=8765)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--dev", action="store_true")
     args = parser.parse_args()
 
     project_root = args.project_root.expanduser().resolve()
@@ -168,27 +164,34 @@ def main() -> int:
 
     export_data(project_root)
     node, pnpm, npm = runtime_paths()
-    manager, mode, env = prepare_dependencies(node, pnpm, npm)
+    manager, _, env = prepare_dependencies(node, pnpm, npm)
     if args.prepare_only:
         print("Dashboard preparation complete.")
         return 0
 
     api_process = start_local_api(project_root, args.api_port)
     env["NEXT_PUBLIC_LOCAL_API_URL"] = f"http://127.0.0.1:{args.api_port}"
+    frontend_process: subprocess.Popen[str] | None = None
     try:
-        active_url = existing_server_url()
-        if active_url:
-            print(f"Local: {active_url}/", flush=True)
-            if api_process:
-                return api_process.wait()
-            return 0
-
-        if mode == "pnpm":
-            command = [str(manager), "run", "dev", "--", "--port", str(args.port)]
-        else:
-            command = [str(manager), "run", "dev", "--", "--port", str(args.port)]
-        return subprocess.call(command, cwd=SITE_ROOT, env=env)
+        if not args.dev:
+            subprocess.run([str(manager), "run", "build"], cwd=SITE_ROOT, env=env, check=True)
+        command = [
+            str(manager),
+            "run",
+            "dev" if args.dev else "start",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(args.port),
+        ]
+        frontend_process = subprocess.Popen(command, cwd=SITE_ROOT, env=env, text=True)
+        local_url = f"http://127.0.0.1:{args.port}"
+        wait_for_frontend(local_url, frontend_process)
+        print(f"Local: {local_url}/", flush=True)
+        return frontend_process.wait()
     finally:
+        stop_process(frontend_process)
         stop_process(api_process)
 
 

@@ -1,4 +1,4 @@
 interface:
-  display_name: "爆款素材工作台"
-  short_description: "检查本机剪辑能力，导入对标视频并查看素材、进度和成片"
-  default_prompt: "Use $auto-video-remix-dashboard to check this project's available remix capabilities, open the local dashboard, and create a dated benchmark task only when the required intake tools exist."
+  display_name: "爆款视频镜头分割"
+  short_description: "把参考视频拆成独立镜头，并生成带构图九宫格的本地网页"
+  default_prompt: "Use $auto-video-remix-dashboard to split the video I provide into a clearly named local folder with independent clips, keyframes, timing data, and a composition-grid HTML report."

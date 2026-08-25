@@ -1,36 +1,6 @@
-# Auto Video Remix Dashboard
+# 爆款视频镜头分割 Skill
 
-一个以 Codex Skill 形式安装、在用户电脑上运行的爆款对标视频工作台。GitHub 只分发程序，素材、对标视频、配音、成片和使用台账保留在本机。
-
-## 它能做什么
-
-- 拖入 MP4、MOV 或 M4V 对标视频，在 `work/` 中建立独立日期任务。
-- 拆解对标视频的镜头边界、时长、关键帧和参考音轨。
-- 查看本机素材缩略图，并按场景、动作、产品和文件名搜索。
-- 查看素材在已确认成片中的使用次数、接近复用上限和自动排除状态。
-- 一屏对照对标爆款、本次选片审核图和生成成片。
-- 查看文案、匹配、配音、渲染、视觉审核、使用审核和交付状态。
-- 浏览历史任务，追回每条视频的对标、镜头数、选片和成片状态。
-
-## 安装后到底能做到哪一步
-
-| 当前电脑具备的内容 | 能做什么 |
-| --- | --- |
-| 只安装这个仓库 | 安装网页 Skill。仍需在兼容的视频项目中打开，不能独立生成成片。 |
-| 项目有 `assets/` 和 `work/` | 查看素材库、历史任务、成片和已有生产状态。 |
-| 再有 FFmpeg、`decompose_reference.py` 和 `run_pipeline.py` | 拖入新的对标视频并完成导入和镜头拆解。 |
-| 再有完整生产脚本、素材库和配音配置 | Codex 可以继续进行素材匹配、整篇配音、渲染、审核和草稿生成。每条任务仍需正式文案授权和人工审核。 |
-
-这个仓库目前是本机网页工作台和对标导入入口。单独安装后，不能自动剪出与作者本机项目相同的最终成片。
-
-完整制作还需要以下环节：
-
-1. 用户提供或确认正式文案。
-2. 建立素材帧缓存并逐镜匹配本机素材。
-3. 整篇文案只调用一次配音服务，生成连续配音。
-4. 按真实配音时间生成画面、字幕和可编辑草稿。
-5. 完成视觉近重复审核、素材使用次数审核和最终验收。
-6. 用户确认成片后，才把素材使用次数写入台账。
+把一条参考视频交给 Codex，自动识别镜头切换，并生成一个以原视频命名的镜头分割文件夹。视频只在用户电脑上处理，不会上传到这个 GitHub 仓库。
 
 ## 安装
 
@@ -40,68 +10,69 @@
 安装 https://github.com/noan1198/auto-video-remix-dashboard 这个 Skill
 ```
 
-安装完成后，在兼容的 Auto Video Remix 项目中发送：
+安装完成后的下一条对话，把视频拖入 Codex，然后发送：
 
 ```text
-打开爆款素材工作台
+把这个视频拆成镜头
 ```
 
-Skill 会读取当前项目、刷新本地数据并打开 `localhost` 网页。首次使用需要 Node.js 22.13 或更高版本，以及 pnpm 或 npm。
+第一次处理视频时，如果电脑没有 FFmpeg，Codex 会请求下载一次本地视频组件。准备完成后，后续视频不需要重复下载。
 
-## 检查当前项目能用到哪一步
+直接下载 GitHub ZIP 只会得到程序文件，不会自动运行。普通用户使用 Codex 的 GitHub Skill 安装方式最简单。
 
-```bash
-python3 scripts/check_project.py --project-root /path/to/video-project
-```
+## 得到什么
 
-检查结果会分别显示：
-
-- 网页查看素材与历史任务是否可用。
-- 对标视频导入和镜头拆解是否可用。
-- 完整生产工具脚本是否存在。
-- 每条成片仍需人工提供或确认的内容。
-
-## 兼容项目结构
+假设原视频名是 `爆款视频一.mp4`，默认生成：
 
 ```text
-video-project/
-├── assets/
-├── work/
-├── final/
-├── asset_usage_registry.json
-├── bin/
-│   └── ffmpeg
-└── tools/
-    ├── decompose_reference.py
-    ├── run_pipeline.py
-    ├── build_asset_frame_catalog.py
-    ├── match_materials.py
-    ├── content_provenance.py
-    ├── generate_whole_voice_once.py
-    ├── render_remix_and_draft.py
-    ├── audit_selected_visual_duplicates.py
-    ├── asset_usage_registry.py
-    └── validate_project.py
+爆款视频一镜头分割/
+├── 构图参考.html
+├── 分镜表.csv
+├── 分镜信息.json
+├── 使用说明.txt
+├── 镜头片段/
+│   ├── 镜头001.mp4
+│   ├── 镜头002.mp4
+│   └── ...
+└── 关键帧/
+    ├── 镜头001.jpg
+    ├── 镜头002.jpg
+    └── ...
 ```
 
-只有查看网页时，不要求所有生产脚本都存在。新建对标任务至少需要 `bin/ffmpeg`、`tools/decompose_reference.py` 和 `tools/run_pipeline.py`。
+双击 `构图参考.html`，每个镜头都可以独立播放。两条横线和两条竖线会叠在画面上，作为拍摄时的构图九宫格，并且可以随时关闭。
 
-## 对标视频的使用边界
+## 能力范围
 
-拖入对标视频只代表允许分析镜头结构、节奏和画面关系。参考视频中的文案、原声、音乐和完整剪辑不会自动进入新成片。拆解完成后，新任务会停在“待提供正式文案”。
+- 支持 MP4、MOV、M4V、WEBM 和 MKV。
+- 自动标出每个镜头的开始时间、结束时间和持续时间。
+- 自动生成独立镜头视频、关键帧、CSV 分镜表和本地构图网页。
+- 镜头识别使用画面变化检测。转场、闪光、非常缓慢的镜头变化可能需要人工检查。
+- 只分析镜头结构和构图。参考视频中的文案、原声、音乐不会被提取后用于新视频。
 
-## 本机隐私
+## 手动运行
 
-- 本机接口只监听 `127.0.0.1`。
-- 公开仓库只保留 `public/dashboard-data.example.json` 演示数据。
-- `public/dashboard-data.json` 和 `public/local-media/` 由每台电脑本机生成，已加入 Git 忽略规则。
-- 程序不会把素材、对标视频、配音、成片、使用历史或绝对路径上传到云端。
-- 素材库作为只读来源使用，新任务只会复制需要的素材，不移动原文件。
-
-## 本地开发
+电脑已有 FFmpeg 时：
 
 ```bash
-pnpm install
-python3 scripts/export_dashboard_data.py --project-root /path/to/video-project
+python3 scripts/split_video.py /path/to/video.mp4
+```
+
+电脑没有 FFmpeg 时：
+
+```bash
+python3 scripts/prepare_splitter.py
+python3 scripts/split_video.py /path/to/video.mp4
+```
+
+使用 `--output-root` 可以指定镜头分割文件夹保存位置，使用 `--name` 可以修改输出名称。
+
+## 本机网页工作台
+
+仓库仍然保留适用于完整 Auto Video Remix 项目的 localhost 工作台。项目中存在 `assets/`、`work/` 和相应生产工具时，可以运行：
+
+```bash
 python3 scripts/launch_dashboard.py --project-root /path/to/video-project
 ```
+
+GitHub 只分发程序。`dashboard-data.json`、本机视频、素材、配音、成片和绝对路径均已排除，不会提交到公开仓库。

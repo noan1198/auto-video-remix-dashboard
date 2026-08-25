@@ -33,7 +33,8 @@ class LocalApiTests(unittest.TestCase):
         self.assertEqual(config["canvas"]["orientation"], "portrait")
         self.assertEqual(config["voice"]["mode"], "whole_script_single_request")
         self.assertEqual(config["voice"]["max_tts_requests"], 1)
-        self.assertEqual(config["draft"]["target"], "none")
+        self.assertEqual(config["draft"]["target"], "jianying")
+        self.assertEqual(config["draft"]["mode"], "native_batch_import")
 
     def test_capability_check_separates_viewer_reference_and_production_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
