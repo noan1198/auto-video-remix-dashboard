@@ -57,7 +57,7 @@ def resolve_ffmpeg(explicit: str | None = None) -> Path:
         return Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
     except (ImportError, RuntimeError):
         prepared_python = runtime_python()
-        if prepared_python.is_file() and Path(sys.executable).resolve() != prepared_python.resolve():
+        if prepared_python.is_file() and Path(sys.executable).absolute() != prepared_python.absolute():
             os.execv(str(prepared_python), [str(prepared_python), str(Path(__file__).resolve()), *sys.argv[1:]])
         raise RuntimeError(
             "缺少本地视频组件。请先运行 scripts/prepare_splitter.py，完成后重新执行本命令。"
